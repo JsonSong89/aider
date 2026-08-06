@@ -17,3 +17,13 @@ aider/_version.py
 .gitattributes
 tmp.benchmarks/
 .docker_bash_history
+/aider.iml
+/.idea/.gitignore
+/.idea/db-forest-config.xml
+/.idea/deployment.xml
+/.idea/encodings.xml
+/.idea/go.imports.xml
+/.idea/j2kLlmSettings.xml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml

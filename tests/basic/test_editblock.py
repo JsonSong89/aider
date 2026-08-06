@@ -320,6 +320,25 @@ These changes replace the `subprocess.run` patches with `subprocess.check_output
         result = eb.replace_most_similar_chunk(whole, part, replace)
         self.assertEqual(result, expected_output)
 
+    def test_replace_with_cjk_fullwidth_halfwidth_punct(self):
+        # File uses full-width punctuation; SEARCH uses half-width.
+        # REPLACE should follow AI output unchanged.
+        whole = "# 计算阶乘，并返回结果。\ndef factorial(n):\n    return n\n"
+        part = "# 计算阶乘,并返回结果.\ndef factorial(n):\n"
+        replace = "# 计算阶乘,并返回结果.\ndef factorial(n):\n    # updated\n"
+        expected = "# 计算阶乘,并返回结果.\ndef factorial(n):\n    # updated\n    return n\n"
+
+        result = eb.replace_most_similar_chunk(whole, part, replace)
+        self.assertEqual(result, expected)
+
+    def test_replace_with_cjk_punct_not_unique(self):
+        whole = "# 你好，世界。\nfoo\n# 你好，世界。\nbar\n"
+        part = "# 你好,世界.\n"
+        replace = "# hi\n"
+
+        result = eb.replace_most_similar_chunk(whole, part, replace)
+        self.assertIsNone(result)
+
     def test_create_new_file_with_other_file_in_chat(self):
         # https://github.com/Aider-AI/aider/issues/2258
         with ChdirTemporaryDirectory():

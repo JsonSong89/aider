@@ -131,6 +131,30 @@ def prep(content):
     return content, lines
 
 
+# Narrow full/half-width map used only when matching SEARCH text.
+# Other full-width symbols are intentionally left alone to reduce false matches.
+# REPLACE always follows the model output and is never rewritten by this map.
+CJK_PUNCT_TO_HALF = str.maketrans(
+    {
+        "，": ",",
+        "。": ".",
+        "；": ";",
+        "：": ":",
+        "？": "?",
+        "！": "!",
+        "（": "(",
+        "）": ")",
+        "【": "[",
+        "】": "]",
+    }
+)
+
+
+def normalize_cjk_punct(text):
+    """Canonicalize a small set of CJK punctuation to half-width for comparison."""
+    return text.translate(CJK_PUNCT_TO_HALF)
+
+
 def perfect_or_whitespace(whole_lines, part_lines, replace_lines):
     # Try for a perfect match
     res = perfect_replace(whole_lines, part_lines, replace_lines)
@@ -152,6 +176,34 @@ def perfect_replace(whole_lines, part_lines, replace_lines):
         if part_tup == whole_tup:
             res = whole_lines[:i] + replace_lines + whole_lines[i + part_len :]
             return "".join(res)
+
+
+def replace_with_cjk_punct_flexibility(whole_lines, part_lines, replace_lines):
+    """
+    Fallback SEARCH match that ignores full/half-width differences for a narrow
+    punctuation set (，。；：？！（）【】).
+
+    Matching compares normalized text, but the file slice is located by original
+    line offsets. REPLACE lines are written as-is (follow AI output).
+    Refuse to apply when the normalized SEARCH matches more than one place.
+    """
+    part_len = len(part_lines)
+    if part_len == 0 or part_len > len(whole_lines):
+        return
+
+    part_norm = [normalize_cjk_punct(line) for line in part_lines]
+    matches = []
+    for i in range(len(whole_lines) - part_len + 1):
+        chunk_norm = [normalize_cjk_punct(line) for line in whole_lines[i : i + part_len]]
+        if chunk_norm == part_norm:
+            matches.append(i)
+
+    # Require a unique match, same spirit as exact SEARCH uniqueness.
+    if len(matches) != 1:
+        return
+
+    i = matches[0]
+    return "".join(whole_lines[:i] + replace_lines + whole_lines[i + part_len :])
 
 
 def replace_most_similar_chunk(whole, part, replace):
@@ -179,6 +231,12 @@ def replace_most_similar_chunk(whole, part, replace):
             return res
     except ValueError:
         pass
+
+    # Chinese / CJK punctuation full-width vs half-width mismatch fallback.
+    # Only SEARCH is normalized for comparison; REPLACE follows AI output.
+    res = replace_with_cjk_punct_flexibility(whole_lines, part_lines, replace_lines)
+    if res:
+        return res
 
     return
     # Try fuzzy matching
