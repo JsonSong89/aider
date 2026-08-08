@@ -3,6 +3,15 @@
 from . import shell
 from .base_prompts import CoderPrompts
 
+# Shared by main_system / system_reminder / editor-diff main_system.
+edit_reply_format = """The edited content MUST be returned inside *SEARCH/REPLACE* block(s).
+Do not put editable source code outside *SEARCH/REPLACE* blocks.
+
+A short plan before the blocks is OK.
+After the *SEARCH/REPLACE* block(s), answer the user's question in Chinese (if any),
+then give a brief Chinese summary of what was changed.
+"""
+
 
 class EditBlockPrompts(CoderPrompts):
     main_system = """Act as an expert software developer.
@@ -20,13 +29,14 @@ But if you need to propose edits to existing files not already added to the chat
 End your reply and wait for their approval.
 You can keep asking if you then decide you need to edit more files.
 
-2. Think step-by-step and explain the needed changes in a few short sentences.
+2. Optionally outline the needed changes in a few short sentences.
 
 3. Describe each change with a *SEARCH/REPLACE block* per the examples below.
 
+4. After the blocks, answer in Chinese (if the user asked anything) and briefly summarize what changed.
+
 All changes to files must use this *SEARCH/REPLACE block* format.
-ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
-{shell_cmd_prompt}
+""" + edit_reply_format + """{shell_cmd_prompt}
 """
     example_messages = [
         dict(
@@ -76,6 +86,8 @@ mathweb/flask/app.py
     return str(math.factorial(n))
 >>>>>>> REPLACE
 {fence[1]}
+
+已将 `get_factorial()` 改为调用 `math.factorial`，并删除自定义递归实现。
 """,
         ),
         dict(
@@ -113,6 +125,8 @@ def hello():
 from hello import hello
 >>>>>>> REPLACE
 {fence[1]}
+
+已将 `hello()` 抽到新文件 `hello.py`，并在 `main.py` 中改为导入使用。
 """,
         ),
     ]
@@ -154,8 +168,15 @@ If you want to put code in a new file, use a *SEARCH/REPLACE block* with:
 - An empty `SEARCH` section
 - The new file's contents in the `REPLACE` section
 
-{rename_with_shell}{go_ahead_tip}{final_reminders}ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
-{shell_cmd_reminder}
+# 特别注意事项（SEARCH 必须与原文逐字一致）
+生成 SEARCH 时禁止「自动纠正」原文，尤其不要改：
+- 中文全角/半角标点：原文是「，：。」就不要写成「,:.」
+- 空格数量与种类：连续空格、行首缩进、Tab 与空格都不可改动
+示例：原文注释 `注意：逗号，句号。` → SEARCH 必须原样保留 `：` `，` `。`，不得换成 `:` `,` `.`
+空格示例：原文若是 `这 里  有`（1 个空格 + 2 个空格），SEARCH 也必须同样数量。
+任何「看起来等价」的替换都可能导致 SEARCH 匹配失败。
+
+{rename_with_shell}{go_ahead_tip}{final_reminders}""" + edit_reply_format + """{shell_cmd_reminder}
 """
 
     rename_with_shell = """To rename files which have been added to the chat, use shell commands at the end of your response.
