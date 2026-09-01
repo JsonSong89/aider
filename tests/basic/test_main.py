@@ -792,6 +792,36 @@ class TestMain(TestCase):
             )
             self.assertTrue(coder.detect_urls)
 
+    def test_detect_files_default(self):
+        with GitTemporaryDirectory():
+            coder = main(
+                ["--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+            )
+            self.assertTrue(coder.detect_files)
+
+    def test_detect_files_disabled(self):
+        with GitTemporaryDirectory():
+            coder = main(
+                ["--no-detect-files", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+            )
+            self.assertFalse(coder.detect_files)
+
+    def test_detect_files_enabled(self):
+        with GitTemporaryDirectory():
+            coder = main(
+                ["--detect-files", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+            )
+            self.assertTrue(coder.detect_files)
+
     def test_accepts_settings_warnings(self):
         # Test that appropriate warnings are shown based on accepts_settings configuration
         with GitTemporaryDirectory():

@@ -116,6 +116,7 @@ class Coder:
     num_cache_warming_pings = 0
     suggest_shell_commands = True
     detect_urls = True
+    detect_files = True
     ignore_mentions = None
     chat_language = None
     commit_language = None
@@ -332,6 +333,7 @@ class Coder:
         chat_language=None,
         commit_language=None,
         detect_urls=True,
+        detect_files=True,
         ignore_mentions=None,
         total_tokens_sent=0,
         total_tokens_received=0,
@@ -363,6 +365,8 @@ class Coder:
 
         self.suggest_shell_commands = suggest_shell_commands
         self.detect_urls = detect_urls
+        self.detect_files = detect_files
+        self._tags_map = None
 
         self.num_cache_warming_pings = num_cache_warming_pings
 
@@ -1711,7 +1715,90 @@ class Coder:
                 )
             ]
 
-    def get_file_mentions(self, content, ignore_current=False):
+    def _norm_rel_fname(self, rel_fname):
+        return rel_fname.replace("\\", "/")
+
+    def _rel_dir(self, rel_fname):
+        rel_dir = os.path.dirname(self._norm_rel_fname(rel_fname))
+        if rel_dir == ".":
+            return ""
+        return rel_dir
+
+    def get_mention_seed_rel_fnames(self):
+        seeds = set(self.get_inchat_relative_files())
+        seeds.update(self.get_rel_fname(fname) for fname in self.abs_read_only_fnames)
+        return {self._norm_rel_fname(seed) for seed in seeds if seed}
+
+    def is_dir_neighbor(self, seed_rel, cand_rel):
+        """Same directory, or one directory up/down from the seed file."""
+        seed_dir = self._rel_dir(seed_rel)
+        cand_dir = self._rel_dir(cand_rel)
+        if cand_dir == seed_dir:
+            return True
+
+        seed_parent = os.path.dirname(seed_dir)
+        if seed_parent == ".":
+            seed_parent = ""
+        if cand_dir == seed_parent:
+            return True
+
+        cand_parent = os.path.dirname(cand_dir)
+        if cand_parent == ".":
+            cand_parent = ""
+        return bool(cand_dir) and cand_parent == seed_dir
+
+    def get_tags_map(self):
+        if self.repo_map:
+            return self.repo_map
+        if self._tags_map is None:
+            self._tags_map = RepoMap(
+                map_tokens=0,
+                root=self.root,
+                main_model=self.main_model,
+                io=self.io,
+            )
+        return self._tags_map
+
+    def get_file_tag_names(self, rel_fname):
+        tags_map = self.get_tags_map()
+        abs_fname = self.abs_root_path(rel_fname)
+        tags = tags_map.get_tags(abs_fname, rel_fname) or []
+        defs = set()
+        refs = set()
+        for tag in tags:
+            if tag.kind == "def":
+                defs.add(tag.name)
+            elif tag.kind == "ref":
+                refs.add(tag.name)
+        return defs, refs
+
+    def collect_seed_tag_names(self, seeds):
+        seed_defs = set()
+        seed_refs = set()
+        for seed in seeds:
+            defs, refs = self.get_file_tag_names(seed)
+            seed_defs.update(defs)
+            seed_refs.update(refs)
+        return seed_defs, seed_refs
+
+    def is_tag_connected(self, rel_fname, seed_defs, seed_refs):
+        if not seed_defs and not seed_refs:
+            return False
+        cand_defs, cand_refs = self.get_file_tag_names(rel_fname)
+        return bool(seed_refs & cand_defs or seed_defs & cand_refs)
+
+    def is_related_mention(self, rel_fname, seeds, seed_defs=None, seed_refs=None):
+        if not seeds:
+            return False
+        norm = self._norm_rel_fname(rel_fname)
+        for seed in seeds:
+            if self.is_dir_neighbor(seed, norm):
+                return True
+        if seed_defs is None or seed_refs is None:
+            seed_defs, seed_refs = self.collect_seed_tag_names(seeds)
+        return self.is_tag_connected(norm, seed_defs, seed_refs)
+
+    def get_file_mentions(self, content, ignore_current=False, related_only=False):
         words = set(word for word in content.split())
 
         # drop sentence punctuation from the end
@@ -1724,6 +1811,8 @@ class Coder:
         if ignore_current:
             addable_rel_fnames = self.get_all_relative_files()
             existing_basenames = {}
+            # Context mode lists files explicitly; do not apply neighborhood filtering.
+            related_only = False
         else:
             addable_rel_fnames = self.get_addable_relative_files()
 
@@ -1734,11 +1823,13 @@ class Coder:
 
         mentioned_rel_fnames = set()
         fname_to_rel_fnames = {}
+        normalized_words = set(word.replace("\\", "/") for word in words)
         for rel_fname in addable_rel_fnames:
-            normalized_rel_fname = rel_fname.replace("\\", "/")
-            normalized_words = set(word.replace("\\", "/") for word in words)
+            normalized_rel_fname = self._norm_rel_fname(rel_fname)
+            # High precision: a full relative path with a directory component.
             if normalized_rel_fname in normalized_words:
-                mentioned_rel_fnames.add(rel_fname)
+                if not related_only or "/" in normalized_rel_fname:
+                    mentioned_rel_fnames.add(rel_fname)
 
             fname = os.path.basename(rel_fname)
 
@@ -1748,18 +1839,35 @@ class Coder:
                     fname_to_rel_fnames[fname] = []
                 fname_to_rel_fnames[fname].append(rel_fname)
 
+        seeds = self.get_mention_seed_rel_fnames() if related_only else set()
+        seed_defs = seed_refs = None
+        if related_only and seeds:
+            seed_defs, seed_refs = self.collect_seed_tag_names(seeds)
+
         for fname, rel_fnames in fname_to_rel_fnames.items():
             # If the basename is already in chat, don't add based on a basename mention
             if fname in existing_basenames:
                 continue
-            # If the basename mention is unique among addable files and present in the text
-            if len(rel_fnames) == 1 and fname in words:
+            if fname not in words:
+                continue
+            if related_only:
+                related = [
+                    rel_fname
+                    for rel_fname in rel_fnames
+                    if self.is_related_mention(rel_fname, seeds, seed_defs, seed_refs)
+                ]
+                if len(related) == 1:
+                    mentioned_rel_fnames.add(related[0])
+            elif len(rel_fnames) == 1:
                 mentioned_rel_fnames.add(rel_fnames[0])
 
         return mentioned_rel_fnames
 
     def check_for_file_mentions(self, content):
-        mentioned_rel_fnames = self.get_file_mentions(content)
+        if not self.detect_files:
+            return
+
+        mentioned_rel_fnames = self.get_file_mentions(content, related_only=True)
 
         new_mentions = mentioned_rel_fnames - self.ignore_mentions
 

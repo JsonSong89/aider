@@ -9,3 +9,4 @@
 | 3 | `diff` prompt 追加 SEARCH 特别注意事项（全角/半角与空格须与原文一致） | [.diff_docs/diff-SEARCH特别注意事项prompt.md](.diff_docs/diff-SEARCH特别注意事项prompt.md) |
 | 4 | `diff` 去掉 ONLY EVER 仅出块；要求块后中文回答与变更总结 | [.diff_docs/diff-回复须含中文总结.md](.diff_docs/diff-回复须含中文总结.md) |
 | 5 | 固定显示版本为 `0.86.2`（不跟 setuptools_scm 的 `.dev` 浮动） | [.diff_docs/固定版本号0.86.2.md](.diff_docs/固定版本号0.86.2.md) |
+| 6 | `detect-files`：提到文件加入对话改为路径点名 + 邻域 basename；开关不影响新建/未入对话编辑确认 | [.diff_docs/detect-files邻域匹配.md](.diff_docs/detect-files邻域匹配.md) |

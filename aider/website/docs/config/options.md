@@ -86,7 +86,8 @@ usage: aider [-h] [--model] [--openai-api-key] [--anthropic-api-key]
              [--multiline | --no-multiline]
              [--notifications | --no-notifications]
              [--notifications-command]
-             [--detect-urls | --no-detect-urls] [--editor]
+             [--detect-urls | --no-detect-urls]
+             [--detect-files | --no-detect-files] [--editor]
              [--shell-completions] [--opus] [--sonnet] [--haiku]
              [--4] [--4o] [--mini] [--4-turbo] [--35turbo]
              [--deepseek] [--o1-mini] [--o1-preview]
@@ -787,6 +788,14 @@ Environment variable: `AIDER_DETECT_URLS`
 Aliases:
   - `--detect-urls`
   - `--no-detect-urls`
+
+### `--detect-files`
+Enable/disable detection and offering to add mentioned files to chat. Does not affect confirming new files or edits to files not yet in the chat (default: True)  
+Default: True  
+Environment variable: `AIDER_DETECT_FILES`  
+Aliases:
+  - `--detect-files`
+  - `--no-detect-files`
 
 ### `--editor VALUE`
 Specify which editor to use for the /editor command  

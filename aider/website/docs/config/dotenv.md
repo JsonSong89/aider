@@ -445,6 +445,9 @@ cog.outl("```")
 ## Enable/disable detection and offering to add URLs to chat (default: True)
 #AIDER_DETECT_URLS=true
 
+## Enable/disable detection and offering to add mentioned files to chat. Does not affect confirming new files or edits to files not yet in the chat (default: True)
+#AIDER_DETECT_FILES=true
+
 ## Specify which editor to use for the /editor command
 #AIDER_EDITOR=
 

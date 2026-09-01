@@ -846,6 +846,15 @@ def get_parser(default_config_files, git_root):
         help="Enable/disable detection and offering to add URLs to chat (default: True)",
     )
     group.add_argument(
+        "--detect-files",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Enable/disable detection and offering to add mentioned files to chat. Does not"
+            " affect confirming new files or edits to files not yet in the chat (default: True)"
+        ),
+    )
+    group.add_argument(
         "--editor",
         help="Specify which editor to use for the /editor command",
     )

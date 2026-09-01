@@ -138,14 +138,23 @@ class TestCoder(unittest.TestCase):
             # Initialize the Coder object with the mocked IO and mocked repo
             coder = Coder.create(self.GPT35, None, mock_io)
 
-            # Call the check_for_file_mentions method
+            # Bare basenames are ignored until a related chat file exists
+            coder.check_for_file_mentions("Please check file1.txt and file2.py")
+            self.assertEqual(coder.abs_fnames, set())
+
+            seed = Path("seed.txt")
+            seed.write_text("seed\n")
+            repo.git.add(str(seed))
+            repo.git.commit("-m", "seed")
+            coder.add_rel_fname(str(seed))
+
             coder.check_for_file_mentions("Please check file1.txt and file2.py")
 
-            # Check if coder.abs_fnames contains both files
             expected_files = set(
                 [
                     str(Path(coder.root) / fname1),
                     str(Path(coder.root) / fname2),
+                    str(Path(coder.root) / seed),
                 ]
             )
 
@@ -167,10 +176,13 @@ class TestCoder(unittest.TestCase):
             mock.return_value = set([str(fname), str(other_fname)])
             coder.repo.get_tracked_files = mock
 
-            # Call the check_for_file_mentions method
+            # A root-level basename is not a full path; with no chat seeds it is ignored
             coder.check_for_file_mentions(f"Please check {fname}!")
+            self.assertEqual(coder.abs_fnames, set())
 
-            self.assertEqual(coder.abs_fnames, set([str(fname.resolve())]))
+            # A full relative path is always eligible
+            coder.check_for_file_mentions(f"Please check {other_fname}!")
+            self.assertEqual(coder.abs_fnames, set([str(other_fname.resolve())]))
 
     def test_skip_duplicate_basename_mentions(self):
         with GitTemporaryDirectory():
@@ -442,6 +454,96 @@ Once I have these, I can show you precisely how to do the thing.
                         expected_files,
                         f"Failed for content: {content}, addable_files: {addable_files}",
                     )
+
+    def test_related_mentions_require_neighborhood(self):
+        with GitTemporaryDirectory():
+            io = InputOutput(pretty=False, yes=True)
+            coder = Coder.create(self.GPT35, None, io)
+
+            seed = Path("src") / "app.py"
+            neighbor = Path("src") / "utils.py"
+            parent = Path("package.json")
+            child = Path("src") / "nested" / "helper.py"
+            distant = Path("docs") / "guide.md"
+
+            for fname in (seed, neighbor, parent, child, distant):
+                fname.parent.mkdir(parents=True, exist_ok=True)
+                fname.touch()
+
+            mock = MagicMock()
+            mock.return_value = set(str(f) for f in (seed, neighbor, parent, child, distant))
+            coder.repo.get_tracked_files = mock
+            coder.add_rel_fname(str(seed))
+
+            mentioned = coder.get_file_mentions("Check utils.py and package.json", related_only=True)
+            self.assertEqual(mentioned, {str(neighbor), str(parent)})
+
+            mentioned = coder.get_file_mentions("Check helper.py", related_only=True)
+            self.assertEqual(mentioned, {str(child)})
+
+            mentioned = coder.get_file_mentions("Check guide.md", related_only=True)
+            self.assertEqual(mentioned, set())
+
+            mentioned = coder.get_file_mentions("Check docs/guide.md", related_only=True)
+            self.assertEqual(mentioned, {str(distant)})
+
+    def test_related_mentions_tag_neighbors(self):
+        with GitTemporaryDirectory():
+            io = InputOutput(pretty=False, yes=True)
+            coder = Coder.create(self.GPT35, None, io)
+
+            seed = Path("pkg") / "seed.py"
+            related = Path("other") / "related.py"
+            unrelated = Path("other") / "unrelated.py"
+
+            seed.parent.mkdir(parents=True, exist_ok=True)
+            related.parent.mkdir(parents=True, exist_ok=True)
+            seed.write_text("class SpecialHelper:\n    pass\n")
+            related.write_text("from pkg.seed import SpecialHelper\n\nobj = SpecialHelper()\n")
+            unrelated.write_text("def leftover():\n    return 1\n")
+
+            mock = MagicMock()
+            mock.return_value = set(str(f) for f in (seed, related, unrelated))
+            coder.repo.get_tracked_files = mock
+            coder.add_rel_fname(str(seed))
+
+            mentioned = coder.get_file_mentions("Please look at related.py", related_only=True)
+            self.assertEqual(mentioned, {str(related)})
+
+            mentioned = coder.get_file_mentions("Please look at unrelated.py", related_only=True)
+            self.assertEqual(mentioned, set())
+
+    def test_detect_files_disabled_skips_chat_add(self):
+        with GitTemporaryDirectory():
+            repo = git.Repo()
+            io = InputOutput(pretty=False, yes=True)
+            fname = Path("src") / "app.py"
+            fname.parent.mkdir(parents=True, exist_ok=True)
+            fname.write_text("print('hi')\n")
+            repo.git.add(str(fname))
+            repo.git.commit("-m", "init")
+
+            coder = Coder.create(self.GPT35, None, io, detect_files=False)
+            result = coder.check_for_file_mentions(f"Please check `{fname}`")
+            self.assertIsNone(result)
+            self.assertEqual(coder.abs_fnames, set())
+
+    def test_detect_files_disabled_still_confirms_new_file(self):
+        with GitTemporaryDirectory():
+            repo = git.Repo()
+            fname = Path("added.txt")
+            fname.touch()
+            repo.git.add(str(fname))
+            repo.git.commit("-m", "init")
+
+            io = MagicMock()
+            io.confirm_ask = MagicMock(return_value=True)
+            coder = Coder.create(self.GPT35, None, io, fnames=["added.txt"], detect_files=False)
+
+            self.assertTrue(coder.allowed_to_edit("added.txt"))
+            self.assertTrue(coder.allowed_to_edit("new.txt"))
+            self.assertIn("new.txt", str(coder.abs_fnames))
+            io.confirm_ask.assert_any_call("Create new file?", subject="new.txt")
 
     def test_run_with_file_deletion(self):
         # Create a few temporary files
